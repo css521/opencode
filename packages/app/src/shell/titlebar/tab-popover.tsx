@@ -99,6 +99,8 @@ export function TabPreviewPopover(props: {
     ),
   )
   onCleanup(() => {
+    if (card && (card === glide.active || card === glide.card || card === glide.from)) cancel()
+
     if (activePreview !== close) return
     activePreview = undefined
     lastClosedAt = Date.now()
@@ -223,7 +225,15 @@ function standIn(card: HTMLElement) {
   Object.assign(ghost.style, { position: "fixed", left: "0", top: "0", opacity: "1" })
   ghost.style.transform = `translate(${rect.left}px, ${rect.top}px)`
   document.body.append(ghost)
-  Object.assign(glide, { ghost, card: undefined, left: rect.left, top: rect.top, base: Number.NaN, frames: 0 })
+  Object.assign(glide, {
+    ghost,
+    from: card,
+    card: undefined,
+    left: rect.left,
+    top: rect.top,
+    base: Number.NaN,
+    frames: 0,
+  })
   glide.stop ??= frameLoop.addMeasured(read, write)
 }
 
@@ -290,10 +300,20 @@ function write(dt: number) {
 function finish() {
   glide.card?.style.removeProperty("opacity")
   glide.ghost?.remove()
-  glide.ghost = undefined
-  glide.stop = undefined
+
+  if (!glide.active?.isConnected) glide.active = undefined
+  Object.assign(glide, { ghost: undefined, from: undefined, card: undefined, stop: undefined })
 
   return false
+}
+
+// A tab whose preview is part of a glide went away: end the glide now rather than leave its stand-in behind.
+function cancel() {
+  glide.stop?.()
+  glide.card?.style.removeProperty("transform")
+  glide.active = undefined
+  glide.offset.snap(0)
+  finish()
 }
 
 type Glide = {
@@ -307,4 +327,6 @@ type Glide = {
   fade: Spring
   stop?: () => void
   active?: HTMLElement
+  // The card the stand-in was copied from.
+  from?: HTMLElement
 }
