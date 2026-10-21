@@ -1,7 +1,7 @@
 import { Button } from "@opencode/ui/button"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Option } from "effect"
-import { onMount } from "solid-js"
+import { createSignal, onMount, Show } from "solid-js"
 import { SettingsPanel } from "../../../storybook/.storybook/mocks/gui-extensions/settings-page"
 import { DialogBetaNotes } from "./beta-dialog"
 import { BetaNotesView } from "./beta-page"
@@ -130,8 +130,10 @@ const embedded = (picked: typeof commits): EmbeddedNotes => ({
 const offline = (picked: typeof commits): typeof commits =>
   picked.map(([type, summary, pr, author]) => [type, summary, pr, { name: author.name }])
 
+// View all opens the What's new page in place of the story, as the app opens it in Settings.
 function Fixture(props: { picked: typeof commits; previous?: string; previousCommit?: string }) {
   const dialog = useDialog()
+  const [page, setPage] = createSignal(false)
   const notes = Option.getOrThrow(sliceBetaNotes(embedded(props.picked), props.previousCommit ?? sha(999)))
 
   const open = () =>
@@ -141,13 +143,22 @@ function Fixture(props: { picked: typeof commits; previous?: string; previousCom
         previous={props.previous ?? "0.0.0-beta-21180"}
         dialog={{ close: () => dialog.close() }}
         open={(href) => window.open(href, "_blank")}
-        viewAll={() => dialog.close()}
+        viewAll={() => {
+          dialog.close()
+          setPage(true)
+        }}
       />
     ))
 
   onMount(open)
 
-  return <Button onClick={open}>Open What's new in beta</Button>
+  return (
+    <Show when={page()} fallback={<Button onClick={open}>Open What's new in beta</Button>}>
+      <SettingsPanel>
+        <BetaNotesView embedded={embedded(props.picked)} open={(href) => window.open(href, "_blank")} />
+      </SettingsPanel>
+    </Show>
+  )
 }
 
 export default {
@@ -166,7 +177,7 @@ export default {
 /** A typical update: a few features and fixes. */
 export const Typical = { render: () => <Fixture picked={commits.slice(0, 8)} /> }
 
-/** More than ten changes: the rest are linked on GitHub. */
+/** More than ten changes: View all opens the What's new page. */
 export const Many = {
   render: () => <Fixture picked={commits} previous="0.0.0-beta-21012" />,
 }
@@ -179,7 +190,7 @@ export const FixesOnly = {
   render: () => <Fixture picked={commits.filter(([type]) => type === "fix").slice(0, 4)} />,
 }
 
-/** The previous build is older than the embedded history: the newest changes stand in, and the rest are linked. */
+/** The previous build is older than the embedded history: the newest changes stand in, and View all shows the rest. */
 export const PreviousBuildUnknown = {
   render: () => <Fixture picked={commits} previous="0.0.0-beta-20500" previousCommit={sha(5000)} />,
 }
