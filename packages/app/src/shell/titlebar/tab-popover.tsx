@@ -144,6 +144,7 @@ export function TabPreviewPopover(props: {
             if (props.orientation !== "vertical" || !glides()) return
 
             if (glide.ghost) claim(el)
+            glide.opened = { card: el, at: performance.now() }
             measure(el)
           }}
           data-component="session-tab-popover"
@@ -202,6 +203,11 @@ function leave(card: HTMLElement) {
   document.body.append(ghost)
   Object.assign(glide, { ghost, card: undefined, left: rect.left, top: rect.top, base: Number.NaN, frames: 0 })
   glide.stop ??= frameLoop.addMeasured(read, write)
+
+  // The next tab's preview usually opens first and closes this one, in the same task.
+  const opened = glide.opened
+
+  if (opened && opened.card !== card && opened.card.isConnected && performance.now() - opened.at < 50) claim(opened.card)
 }
 
 // Where each open card was placed. Kobalte may already have removed a closing card by the time it hands over.
@@ -283,4 +289,5 @@ type Glide = {
   offset: Spring
   fade: Spring
   stop?: () => void
+  opened?: { card: HTMLElement; at: number }
 }
