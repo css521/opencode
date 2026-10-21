@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test"
 import { Option } from "effect"
-import { betaBuild, decodeEmbeddedNotes, sliceBetaNotes, visualSource, type EmbeddedNotes } from "./beta-notes"
+import {
+  allBetaNotes,
+  betaBuild,
+  betaHistory,
+  decodeEmbeddedNotes,
+  sliceBetaNotes,
+  visualSource,
+  type EmbeddedNotes,
+} from "./beta-notes"
 
 const sha = (n: number) => n.toString(16).padStart(4, "0").padEnd(40, "a")
 
@@ -20,8 +28,6 @@ function embedded(input: { notes: (n: number) => "feat" | "fix" | "chore" }): Em
     }),
   }
 }
-
-const compare = (from: number) => `https://github.com/anomalyco/opencode/compare/${sha(from)}...${sha(30)}`
 
 test("lists the notes after the previous commit, features first, humanized, with pull request links", () => {
   const notes = sliceBetaNotes(
@@ -59,16 +65,16 @@ test("lists the notes after the previous commit, features first, humanized, with
       { sha: short(28), type: "perf", summary: "Cache the model list" },
     ],
     total: 3,
-    more: undefined,
+    more: false,
   })
 })
 
 test.each([
   // previous commit, note types, [features, fixes] listed, total, more
-  ["found, all listed", sha(20), (n: number) => (n % 3 === 0 ? "feat" : "chore"), [4, 0], 4, undefined],
-  ["found, more than 10", sha(5), (n: number) => (n % 2 ? "fix" : "feat"), [5, 5], 25, compare(5)],
-  ["found, mostly features", sha(10), (n: number) => (n < 28 ? "feat" : "fix"), [7, 3], 20, compare(10)],
-  ["missing from the history", sha(99), (n: number) => (n % 2 ? "fix" : "feat"), [5, 5], 10, compare(99)],
+  ["found, all listed", sha(20), (n: number) => (n % 3 === 0 ? "feat" : "chore"), [4, 0], 4, false],
+  ["found, more than 10", sha(5), (n: number) => (n % 2 ? "fix" : "feat"), [5, 5], 25, true],
+  ["found, mostly features", sha(10), (n: number) => (n < 28 ? "feat" : "fix"), [7, 3], 20, true],
+  ["missing from the history", sha(99), (n: number) => (n % 2 ? "fix" : "feat"), [5, 5], 10, true],
 ] as const)("previous commit %s", (_, previous, notes, shown, total, more) => {
   const sliced = Option.getOrThrow(sliceBetaNotes(embedded({ notes }), previous))
 
@@ -114,4 +120,16 @@ test("sources a visual with the page's colour, and its still copy for reduced mo
     '<svg viewBox="0 0 240 72"><style>svg{color:rgb(1, 2, 3)}</style><rect><animate/></rect></svg>',
   )
   expect(source(true)).toBe('<svg viewBox="0 0 240 72"><style>svg{color:rgb(1, 2, 3)}</style><rect/></svg>')
+})
+
+test("lists every change the build carries for the What's new page, and links its history", () => {
+  const value = embedded({ notes: (n) => (["feat", "fix", "chore"] as const)[n % 3]! })
+  const notes = allBetaNotes(value)
+
+  expect(notes.added.map((note) => note.summary)).toEqual(
+    [30, 27, 24, 21, 18, 15, 12, 9, 6, 3].map((n) => `Change ${n}`),
+  )
+  expect(notes.fixed).toHaveLength(10)
+  expect([notes.total, notes.more]).toEqual([20, false])
+  expect(betaHistory(value)).toBe(`https://github.com/anomalyco/opencode/commits/${sha(30)}`)
 })

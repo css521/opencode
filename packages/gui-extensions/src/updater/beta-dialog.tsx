@@ -1,4 +1,4 @@
-import { createSignal, For, Match, onMount, Show, Switch } from "solid-js"
+import { createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { Option } from "effect"
 import { Button } from "@opencode/ui/button"
@@ -38,18 +38,23 @@ export function showBetaNotes(
         previous={input.previous}
         dialog={dialog}
         open={(href) => ctx.system.openExternal(href)}
+        viewAll={() => {
+          dialog.close()
+          ctx.layout.settings("whats-new")
+        }}
       />
     ),
     { replace: true },
   )
 }
 
-/** What's new in beta: the listed features and fixes, and a link to the whole range when some are not listed. */
+/** What's new in beta: the listed features and fixes, and the What's new page when some are not listed. */
 export function DialogBetaNotes(props: {
   notes: BetaNotes
   previous: string
   dialog: DialogHandle
   open: (href: string) => void
+  viewAll: () => void
 }) {
   const ctx = useExtension<typeof definition>()
   const [fade, setFade] = createSignal({ top: 0, bottom: 0 })
@@ -97,11 +102,9 @@ export function DialogBetaNotes(props: {
       </DialogBody>
       <DialogFooter>
         <Show when={props.notes.more}>
-          {(href) => (
-            <Button type="button" variant="ghost" class="me-auto" onClick={() => props.open(href())}>
-              {ctx.t("beta.viewAll")}
-            </Button>
-          )}
+          <Button type="button" variant="ghost" class="me-auto" onClick={() => props.viewAll()}>
+            {ctx.t("beta.viewAll")}
+          </Button>
         </Show>
         <Button type="button" variant="contrast" autofocus onClick={() => props.dialog.close()}>
           {ctx.t("beta.done")}
@@ -114,7 +117,7 @@ export function DialogBetaNotes(props: {
 /** How far the list's edges feather once it scrolls. */
 const FADE = 24
 
-function Section(props: { title: string; notes: readonly BetaNote[]; open: (href: string) => void }) {
+export function Section(props: { title: string; notes: readonly BetaNote[]; open: (href: string) => void }) {
   return (
     <Show when={props.notes.length > 0}>
       <section class="flex flex-col gap-2">
@@ -151,7 +154,15 @@ function Visual(props: { visual: NonNullable<BetaNote["visual"]>; label?: string
   const [color, setColor] = createSignal<string>()
   let frame!: HTMLSpanElement
 
-  onMount(() => setColor(getComputedStyle(frame).color))
+  // The theme lives on the root element's attributes; read the colour again when they change.
+  onMount(() => {
+    const read = () => setColor(getComputedStyle(frame).color)
+    const observer = new MutationObserver(read)
+
+    read()
+    observer.observe(document.documentElement, { attributes: true })
+    onCleanup(() => observer.disconnect())
+  })
 
   return (
     <span

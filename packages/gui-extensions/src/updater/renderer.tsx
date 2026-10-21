@@ -6,6 +6,7 @@ import type definition from "./index"
 
 const setup: Setup<typeof definition> = (ctx) => {
   whatsNew(ctx)
+  betaNotes(ctx)
 
   if (!ctx.desktop) return
   const updater = ctx.uses.updater
@@ -84,6 +85,41 @@ const setup: Setup<typeof definition> = (ctx) => {
   // Beta builds answer the app menu's Check for Updates in the focused window instead of a native dialog. The
   // listener ends with the generation of the main side that sends it.
   createKeyed(updater, (client) => void client.on("check", () => act("check")))
+}
+
+/**
+ * What's new in beta as a settings page and a command, so it is a keystroke away after its dialog closes. Only builds
+ * that embed the notes have it: beta builds and the desktop dev server.
+ */
+function betaNotes(ctx: SetupContext<typeof definition>) {
+  if (!import.meta.env.OPENCODE_BETA_NOTES) return
+
+  const Page = lazy(() => import("./beta-page"))
+
+  ctx.add(SettingsPage, {
+    id: "whats-new",
+    icon: "flask",
+    get title() {
+      return ctx.t("beta.title")
+    },
+    get entries() {
+      return [{ id: "whats-new", title: ctx.t("beta.title"), keywords: "changelog release notes beta" }]
+    },
+    render: () => (
+      <Suspense>
+        <Page />
+      </Suspense>
+    ),
+  })
+
+  ctx.add(Command, {
+    id: "whats-new",
+    get title() {
+      return ctx.t("beta.title")
+    },
+    keywords: "changelog release notes beta",
+    run: () => ctx.layout.settings("whats-new"),
+  })
 }
 
 /**

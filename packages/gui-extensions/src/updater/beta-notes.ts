@@ -56,14 +56,14 @@ export type BetaNotes = {
   readonly fixed: readonly BetaNote[]
   /** How many changes the header counts: every one since the previous build, or the listed ones when that is unknown. */
   readonly total: number
-  /** The GitHub compare page of the whole range, when some changes are not listed. */
-  readonly more?: string
+  /** Some changes since the previous build are not listed. */
+  readonly more: boolean
 }
 
 /**
  * The changes since the build at `previous`: the notes of the commits newer than it, features first, then fixes, at
  * most 10 in all and at least half of them features when there are enough. When `previous` is older than the embedded
- * history (or was force-pushed away), the newest notes stand in, with the rest linked. None without a previous commit,
+ * history (or was force-pushed away), the newest notes stand in, with the rest on the What's new page. None without a previous commit,
  * or without a change.
  */
 export function sliceBetaNotes(embedded: EmbeddedNotes, previous: string | undefined): Option.Option<BetaNotes> {
@@ -86,9 +86,22 @@ export function sliceBetaNotes(embedded: EmbeddedNotes, previous: string | undef
     added: added.map(item),
     fixed: fixed.map(item),
     total: cut === -1 ? listed : notes.length,
-    more: cut === -1 || listed < notes.length ? `${REPOSITORY}/compare/${previous}...${embedded.sha}` : undefined,
+    more: cut === -1 || listed < notes.length,
   })
 }
+
+/** Every change the build carries, features first, then fixes, newest first: the What's new page. */
+export function allBetaNotes(embedded: EmbeddedNotes): BetaNotes {
+  return {
+    added: embedded.notes.filter((note) => note.type === "feat").map(item),
+    fixed: embedded.notes.filter((note) => note.type !== "feat").map(item),
+    total: embedded.notes.length,
+    more: false,
+  }
+}
+
+/** The build's commit history on GitHub. */
+export const betaHistory = (embedded: EmbeddedNotes) => `${REPOSITORY}/commits/${embedded.sha}`
 
 /** The beta run number of a version such as `0.0.0-beta-21180`, or the version itself. */
 export function betaBuild(version: string) {

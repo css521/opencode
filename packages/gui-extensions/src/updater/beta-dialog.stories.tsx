@@ -2,7 +2,9 @@ import { Button } from "@opencode/ui/button"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Option } from "effect"
 import { onMount } from "solid-js"
+import { SettingsPanel } from "../../../storybook/.storybook/mocks/gui-extensions/settings-page"
 import { DialogBetaNotes } from "./beta-dialog"
+import { BetaNotesView } from "./beta-page"
 import { sliceBetaNotes, type EmbeddedNotes } from "./beta-notes"
 
 type Author = { name: string; login?: string; avatar?: string }
@@ -139,6 +141,7 @@ function Fixture(props: { picked: typeof commits; previous?: string; previousCom
         previous={props.previous ?? "0.0.0-beta-21180"}
         dialog={{ close: () => dialog.close() }}
         open={(href) => window.open(href, "_blank")}
+        viewAll={() => dialog.close()}
       />
     ))
 
@@ -179,4 +182,13 @@ export const FixesOnly = {
 /** The previous build is older than the embedded history: the newest changes stand in, and the rest are linked. */
 export const PreviousBuildUnknown = {
   render: () => <Fixture picked={commits} previous="0.0.0-beta-20500" previousCommit={sha(5000)} />,
+}
+
+/** Settings > What's new in beta: every change the build carries, from ⌘K, Settings or the dialog's View all. */
+export const Page = {
+  render: () => (
+    <SettingsPanel>
+      <BetaNotesView embedded={embedded(commits)} open={(href) => window.open(href, "_blank")} />
+    </SettingsPanel>
+  ),
 }
