@@ -3,16 +3,23 @@ import { motionTuning } from "@opencode/ui/motion-tuning"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 
+const meta = {
+  group: "Sidebar hover",
+  section: "Experiments",
+  description: "The highlight glides between sidebar rows instead of each row lighting up on its own.",
+  target: "[data-titlebar-tab], [data-titlebar-tab-action]",
+}
+
 const choice = motionTuning.choice("sidebar.hover", {
+  ...meta,
   label: "Sidebar hover",
-  group: "Experiments",
   value: "today",
   labels: { today: "Today", glide: "Glide" },
 })
 
 const tuning = motionTuning.spring("sidebar.hover.glide", {
+  ...meta,
   label: "Sidebar hover glide",
-  group: "Experiments",
   presets: {
     snappy: { duration: 0.14, bounce: 0 },
     smooth: { duration: 0.2, bounce: 0 },

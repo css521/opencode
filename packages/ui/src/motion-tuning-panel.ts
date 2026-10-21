@@ -3,6 +3,8 @@ import { motionPresets, motionTuning, type Bezier, type MotionKnob, type MotionP
 
 const global = "Global"
 
+const experiments = "Experiments"
+
 /**
  * Mounts the Motion workspace into `container`: a tab per surface under the shipped values and the Snappy, Smooth and
  * Calm presets for every spring at once. Each tab shows one Global card (speed, slow motion and other settings every surface reads), then one
@@ -30,8 +32,11 @@ export function mountMotionPanel(
   async function start() {
     const { action, choice, defineControls, easing, knob, spring, toggle } = await import("knobs")
 
+    // A lone section needs no tab strip.
+    let tabbed = () => false
+
     const field = (item: MotionKnob) => {
-      const meta = { label: item.label, group: item.group, tab: item.group === global ? undefined : item.group }
+      const meta = { label: item.label, group: item.group, tab: tabbed() ? (item.section ?? item.group) : undefined }
 
       if (item.kind === "spring") return spring(item.initial, meta)
 
@@ -85,15 +90,24 @@ export function mountMotionPanel(
       const list = all.filter((item) => item.kind !== "mode")
       const actions = motionTuning.actions()
       const mounted = identity()
+      const sectionOf = (item: { group: string; section?: string }) => item.section ?? item.group
       const springs = list.flatMap((item) => (item.kind === "spring" && item.group !== active?.group ? [item] : []))
       const preset = (id: MotionPreset) => Object.fromEntries(springs.map((item) => [item.id, item.presets[id]]))
       // Easing editors open inline, like the spring rows beside them, rather than folded behind a chevron.
       openEditors(list.flatMap((item) => (item.kind === "easing" ? [item.id] : [])))
-      const sections = [...new Set([...list, ...actions].map((item) => item.group))].filter((group) => group !== global)
+
+      const sections = [
+        ...new Set([...list, ...actions].flatMap((item) => (item.group === global ? [] : [sectionOf(item)]))),
+      ].toSorted(
+        // Experiments come and go, so they sit last.
+        (a, b) => Number(a === experiments) - Number(b === experiments),
+      )
+
+      tabbed = () => sections.length > 1
 
       // A mode sits in the strip only on its own section's tab; switching to or from that tab rebuilds the strip.
       const modes = all.flatMap((item) =>
-        item.kind === "mode" && item.group === (section ?? sections[0]) ? [item] : [],
+        item.kind === "mode" && sectionOf(item) === (section ?? sections[0]) ? [item] : [],
       )
 
       const controls = defineControls(
@@ -104,12 +118,17 @@ export function mountMotionPanel(
           ...Object.fromEntries(
             [...list, ...actions]
               .filter((item) => item.group !== global)
-              .toSorted((a, b) => sections.indexOf(a.group) - sections.indexOf(b.group))
+              .toSorted((a, b) => sections.indexOf(sectionOf(a)) - sections.indexOf(sectionOf(b)))
               .map((item) =>
                 "run" in item
                   ? [
                       `action.${item.id}`,
-                      action(item.label, { group: item.group, tab: item.group, subsection: "Replay", run: item.run }),
+                      action(item.label, {
+                        group: item.group,
+                        tab: tabbed() ? sectionOf(item) : undefined,
+                        subsection: "Replay",
+                        run: item.run,
+                      }),
                     ]
                   : [item.id, field(item)],
               ),
@@ -119,6 +138,8 @@ export function mountMotionPanel(
           // knobs enables itself only on localhost; this module is only loaded in developer channels.
           enabled: true,
           ship: () => import("knobs/panel"),
+          // Global sits above the tabs and presets leave it alone.
+          pinned: [global],
           persist: "variants",
           // Springs ship different presets, so the defaults get their own chip.
           defaultLabel: "Shipped",
@@ -161,6 +182,17 @@ export function mountMotionPanel(
         })
       })
 
+      // What each row and card heading explains and outlines: the first knob of its group that says.
+      const about = new Map(
+        list.flatMap((item) => {
+          const info = list.find((other) => other.group === item.group && (other.description || other.target))
+
+          return info ? [[item.id, info] as const, [item.group, info] as const] : []
+        }),
+      )
+
+      const stopTarget = explain(container, (key) => about.get(key))
+
       const stopPanel = controls.mount(container, {
         theme: "auto",
         title: options.title ?? "Knobs",
@@ -168,11 +200,11 @@ export function mountMotionPanel(
         // The debug bar shows and hides this panel, and `s` jumps only with focus inside it, so the app keeps its keys.
         toggleKey: false,
         hints: "panel",
-        tabs: sections,
+        tabs: tabbed() ? sections : undefined,
         tab: section,
         onTab: (id) => {
-          const offered = (group: string | undefined) =>
-            all.some((item) => item.kind === "mode" && item.group === group)
+          const offered = (tab: string | undefined) =>
+            all.some((item) => item.kind === "mode" && sectionOf(item) === tab)
 
           const rebuild = offered(section) !== offered(id)
           section = id
@@ -190,6 +222,7 @@ export function mountMotionPanel(
       unmount = () => {
         stopWatch()
         stopModes()
+        stopTarget()
         stopPanel()
       }
     }
@@ -207,4 +240,61 @@ function openEditors(ids: string[]) {
 
   if (ids.every((id) => expanded.includes(id))) return
   sessionStorage.setItem(key, JSON.stringify({ ...session, expanded: [...new Set([...expanded, ...ids])] }))
+}
+
+// What hovering or focusing a row says and shows. knobs shows no group descriptions in a panel, so the description is
+// the row's tooltip, and the part of the app it changes gets a pointer-transparent frame that fades in and out. Rows
+// carry their key in `data-field` and card headings their group in `data-group`.
+function explain(
+  container: HTMLElement,
+  about: (key: string) => { description?: string; target?: string } | undefined,
+) {
+  const frames: HTMLElement[] = []
+
+  const clear = () =>
+    frames.splice(0).forEach((frame) => {
+      frame.style.opacity = "0"
+      setTimeout(() => frame.remove(), 200)
+    })
+
+  const show = (event: Event) => {
+    const spot =
+      event.target instanceof Element ? event.target.closest<HTMLElement>("[data-field], [data-group]") : null
+
+    const info = spot ? about(spot.dataset.field ?? spot.dataset.group ?? "") : undefined
+
+    clear()
+
+    if (!spot || !info) return
+
+    if (info.description) spot.title = info.description
+
+    if (!info.target) return
+
+    document.querySelectorAll(info.target).forEach((element) => {
+      const rect = element.getBoundingClientRect()
+
+      if (rect.width === 0 || rect.height === 0) return
+      const frame = document.body.appendChild(document.createElement("div"))
+
+      frame.style.cssText = `position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .15s;border-radius:6px;
+        left:${rect.left - 3}px;top:${rect.top - 3}px;width:${rect.width + 6}px;height:${rect.height + 6}px;
+        border:1.5px solid var(--border-interactive-base);background:color-mix(in srgb, var(--surface-interactive-base) 50%, transparent)`
+      requestAnimationFrame(() => (frame.style.opacity = "1"))
+      frames.push(frame)
+    })
+  }
+
+  container.addEventListener("pointerover", show)
+  container.addEventListener("focusin", show)
+  container.addEventListener("pointerleave", clear)
+  container.addEventListener("focusout", clear)
+
+  return () => {
+    container.removeEventListener("pointerover", show)
+    container.removeEventListener("focusin", show)
+    container.removeEventListener("pointerleave", clear)
+    container.removeEventListener("focusout", clear)
+    clear()
+  }
 }
