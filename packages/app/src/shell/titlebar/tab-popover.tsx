@@ -141,7 +141,10 @@ export function TabPreviewPopover(props: {
             if (theme) el.setAttribute("data-theme", theme)
             card = el
 
-            if (glide.ghost && props.orientation === "vertical" && glides()) claim(el)
+            if (props.orientation !== "vertical" || !glides()) return
+
+            if (glide.ghost) claim(el)
+            measure(el)
           }}
           data-component="session-tab-popover"
           data-instant={instant() || undefined}
@@ -184,7 +187,7 @@ function leave(card: HTMLElement) {
       ? { left: glide.left, top: glide.top }
       : card.isConnected
         ? card.getBoundingClientRect()
-        : undefined
+        : placed.get(card)
 
   if (!rect) return
   glide.ghost?.remove()
@@ -199,6 +202,18 @@ function leave(card: HTMLElement) {
   document.body.append(ghost)
   Object.assign(glide, { ghost, card: undefined, left: rect.left, top: rect.top, base: Number.NaN, frames: 0 })
   glide.stop ??= frameLoop.addMeasured(read, write)
+}
+
+// Where each open card was placed. Kobalte may already have removed a closing card by the time it hands over.
+const placed = new WeakMap<HTMLElement, DOMRect>()
+
+function measure(card: HTMLElement) {
+  frameLoop.addMeasured(
+    () => {
+      if (card.parentElement?.style.transform) placed.set(card, card.getBoundingClientRect())
+    },
+    () => card.isConnected && !placed.has(card),
+  )
 }
 
 function claim(card: HTMLElement) {
