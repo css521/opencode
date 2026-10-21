@@ -4,7 +4,8 @@
   min-width: 0;
 }
 
-[data-component="session-tab-popover"] {
+[data-component="session-tab-popover"],
+[data-component="session-tab-popover-ghost"] {
   z-index: 50;
   box-sizing: border-box;
   width: 256px;

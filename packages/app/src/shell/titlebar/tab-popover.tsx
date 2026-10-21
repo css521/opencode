@@ -1,5 +1,7 @@
 import { HoverCard } from "@kobalte/core/hover-card"
-import { createEffect, createSignal, onCleanup, Show, type JSXElement } from "solid-js"
+import { frameLoop, prefersReducedMotion, Spring } from "@opencode/ui/motion"
+import { motionTuning } from "@opencode/ui/motion-tuning"
+import { createEffect, createSignal, on, onCleanup, Show, type JSXElement } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import { createMediaQuery } from "@solid-primitives/media"
 import "./tab-popover.css"
@@ -18,6 +20,35 @@ let lastClosedAt = 0
 
 let activePreview: (() => void) | undefined
 
+const glides = motionTuning.toggle("sidebars.preview.glide", {
+  label: "Tab preview glides",
+  group: "Sidebars",
+  value: true,
+})
+
+const spring = motionTuning.spring("sidebars.preview", {
+  label: "Tab preview glide",
+  group: "Sidebars",
+  presets: {
+    snappy: { duration: 0.2, bounce: 0 },
+    smooth: { duration: 0.28, bounce: 0 },
+    calm: { duration: 0.36, bounce: 0 },
+  },
+})
+
+// In the vertical strip, a preview that closes stays behind as a stand-in. If the next tab's preview opens within a
+// couple of frames, the stand-in and the new card travel together from the old place to the new tab while the new text
+// fades in over the old; otherwise the stand-in goes, as a closed preview does.
+const glide: Glide = {
+  left: 0,
+  // The stand-in's visual top, and the new card's laid-out top once its positioner has placed it.
+  top: 0,
+  base: Number.NaN,
+  frames: 0,
+  offset: Spring.fromDuration(0, spring()),
+  fade: Spring.fromDuration(1, { duration: 0.15, bounce: 0 }),
+}
+
 export interface TabPreviewData {
   projectName?: string
   title?: string
@@ -35,6 +66,7 @@ export function TabPreviewPopover(props: {
   const language = useLanguage()
   const mobile = createMediaQuery("(max-width: 767px)")
   let triggerEl: HTMLDivElement | undefined
+  let card: HTMLElement | undefined
   // When opened during a rapid tab-hopping streak, this preview appears and
   // disappears instantly (no repeated enter/exit animation) — only the first,
   // "cold" preview animates. Mirrors how browsers reuse one tab tooltip.
@@ -57,6 +89,15 @@ export function TabPreviewPopover(props: {
     activePreview = undefined
     lastClosedAt = Date.now()
   })
+  createEffect(
+    on(
+      open,
+      (now, before) => {
+        if (before && !now && card && props.orientation === "vertical" && glides()) leave(card)
+      },
+      { defer: true },
+    ),
+  )
   onCleanup(() => {
     if (activePreview !== close) return
     activePreview = undefined
@@ -98,6 +139,9 @@ export function TabPreviewPopover(props: {
             const theme = triggerEl?.closest("[data-theme]")?.getAttribute("data-theme")
 
             if (theme) el.setAttribute("data-theme", theme)
+            card = el
+
+            if (glide.ghost && props.orientation === "vertical" && glides()) claim(el)
           }}
           data-component="session-tab-popover"
           data-instant={instant() || undefined}
@@ -124,4 +168,104 @@ export function TabPreviewPopover(props: {
       </HoverCard.Portal>
     </HoverCard>
   )
+}
+
+function leave(card: HTMLElement) {
+  // A card closing before it was placed hands the stand-in it was taking over to the next one.
+  if (card === glide.card && Number.isNaN(glide.base)) {
+    glide.card = undefined
+    glide.frames = 0
+
+    return
+  }
+
+  const rect =
+    card === glide.card
+      ? { left: glide.left, top: glide.top }
+      : card.isConnected
+        ? card.getBoundingClientRect()
+        : undefined
+
+  if (!rect) return
+  glide.ghost?.remove()
+  // SAFETY: cloning an element yields an element.
+  const ghost = card.cloneNode(true) as HTMLElement
+  ghost.dataset.component = "session-tab-popover-ghost"
+  ghost.setAttribute("aria-hidden", "true")
+  ghost.removeAttribute("id")
+  ghost.removeAttribute("role")
+  Object.assign(ghost.style, { position: "fixed", left: "0", top: "0", opacity: "1" })
+  ghost.style.transform = `translate(${rect.left}px, ${rect.top}px)`
+  document.body.append(ghost)
+  Object.assign(glide, { ghost, card: undefined, left: rect.left, top: rect.top, base: Number.NaN, frames: 0 })
+  glide.stop ??= frameLoop.addMeasured(read, write)
+}
+
+function claim(card: HTMLElement) {
+  card.style.opacity = "0"
+  glide.card = card
+  glide.base = Number.NaN
+}
+
+function read() {
+  // Kobalte's positioner gets its transform once floating-ui has placed it.
+  if (glide.card && Number.isNaN(glide.base) && glide.card.parentElement?.style.transform)
+    glide.base = glide.card.getBoundingClientRect().top
+}
+
+function write(dt: number) {
+  const ghost = glide.ghost
+
+  if (!ghost) return finish()
+
+  if (!glide.card || Number.isNaN(glide.base)) {
+    glide.frames++
+
+    return glide.frames <= (glide.card ? 6 : 2) || finish()
+  }
+
+  if (glide.frames >= 0) {
+    // Starts from where the stand-in is, keeping the velocity of a glide already under way.
+    glide.offset.value = glide.top - glide.base
+    glide.offset.target = 0
+    glide.fade.snap(0)
+    glide.fade.set(1)
+    glide.frames = -1
+  }
+
+  glide.offset.omega = (2 * Math.PI) / spring().duration
+  glide.offset.zeta = 1 - spring().bounce
+
+  if (prefersReducedMotion()) glide.offset.snap(0)
+  const offset = glide.offset.step(dt)
+  const fade = glide.fade.step(dt)
+  glide.top = glide.base + offset
+  glide.card.style.transform = `translateY(${offset}px)`
+  glide.card.style.opacity = String(fade)
+  ghost.style.transform = `translate(${glide.left}px, ${glide.top}px)`
+  // The stand-in stays opaque under the incoming text until it is half in, so the card never looks see-through.
+  ghost.style.opacity = String(Math.min(1, 2 - 2 * fade))
+
+  return !(glide.offset.resting && glide.fade.resting) || finish()
+}
+
+function finish() {
+  glide.card?.style.removeProperty("opacity")
+  glide.ghost?.remove()
+  glide.ghost = undefined
+  glide.stop = undefined
+
+  return false
+}
+
+type Glide = {
+  ghost?: HTMLElement
+  card?: HTMLElement
+  left: number
+  top: number
+  base: number
+  frames: number
+  offset: Spring
+  fade: Spring
+  stop?: () => void
 }
